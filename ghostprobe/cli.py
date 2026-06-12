@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .analyzer import analyze_server
+from .analyzer import analyze_server, analyze_tool_output, diff_tools
 from .report import exit_code, render_json, render_text
 
 
@@ -55,6 +55,18 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--json", action="store_true", dest="as_json")
     st.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
 
+    so = sub.add_parser("scan-output", help="scan a tool's returned text for injection (MCP03)")
+    so.add_argument("path", help="file containing the tool output text (or - for stdin)")
+    so.add_argument("--tool", default="<output>", help="tool name, for the report")
+    so.add_argument("--json", action="store_true", dest="as_json")
+    so.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+
+    df = sub.add_parser("diff", help="diff two tools/list snapshots for rug pulls (MCP02)")
+    df.add_argument("old", help="earlier tools/list JSON")
+    df.add_argument("new", help="later tools/list JSON")
+    df.add_argument("--json", action="store_true", dest="as_json")
+    df.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+
     ns = ap.parse_args(argv)
 
     if ns.cmd == "scan-file":
@@ -81,6 +93,27 @@ def main(argv: list[str] | None = None) -> int:
         target = " ".join([ns.command, *args])
         findings = analyze_server(tools)
         _emit(findings, target, ns.as_json)
+        return exit_code(findings, ns.fail_on)
+
+    if ns.cmd == "scan-output":
+        try:
+            text = sys.stdin.read() if ns.path == "-" else Path(ns.path).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"ghostprobe: cannot read {ns.path}: {e}", file=sys.stderr)
+            return 2
+        findings = analyze_tool_output(ns.tool, text)
+        _emit(findings, f"output of {ns.tool}", ns.as_json)
+        return exit_code(findings, ns.fail_on)
+
+    if ns.cmd == "diff":
+        try:
+            old_tools = load_tools_file(ns.old)
+            new_tools = load_tools_file(ns.new)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"ghostprobe: cannot read snapshots: {e}", file=sys.stderr)
+            return 2
+        findings = diff_tools(old_tools, new_tools)
+        _emit(findings, f"{ns.old} -> {ns.new}", ns.as_json)
         return exit_code(findings, ns.fail_on)
 
     return 0

@@ -24,6 +24,8 @@ Static scanners check the server's code. ghostprobe looks at what the server act
 | OWASP MCP | Check |
 |-----------|-------|
 | MCP01 Tool Poisoning | Instruction-injection phrasing and hidden/invisible Unicode in tool and parameter descriptions |
+| MCP02 Rug Pull | Diff two tool snapshots over time; flags silent description mutation, new tools, and changes that introduce injection |
+| MCP03 Injection via Output | Scans a tool's returned text for instructions, the indirect-injection path when output is attacker-influenced |
 | MCP04 Excessive Capability | Lethal-trifecta detection across the whole toolset (data access + external sink + untrusted input) |
 | MCP05 Sensitive Capability | Tools exposing code or shell execution |
 
@@ -46,6 +48,13 @@ ghostprobe stdio -- npx -y @some/mcp-server
 ```
 
 The `tools.json` for `scan-file` can be a bare list, an MCP `tools/list` result (`{"tools": [...]}`), or a raw JSON-RPC envelope.
+
+Catch a rug pull by diffing two snapshots taken over time, and scan a tool's returned text for indirect injection:
+
+```
+ghostprobe diff yesterday.json today.json --fail-on critical
+ghostprobe scan-output tool_response.txt --tool fetch_url
+```
 
 ## Example
 
@@ -72,9 +81,9 @@ This is a black-box probe of what a server advertises. It reasons about tool *de
 
 ## Roadmap
 
-- Live behavioral probes: call tools with canary inputs and detect injection in their *output* (MCP03).
-- Rug-pull detection: snapshot tool definitions and diff across calls (MCP02).
+- Live behavioral probing: call read-only tools with canary inputs and run the MCP03 output scanner on what they return. The output scanner ships now (`scan-output`); the safe live auto-calling is next.
 - Auth and transport checks for HTTP/SSE servers.
+- A curated corpus of known-bad public servers as regression fixtures.
 
 ## License
 

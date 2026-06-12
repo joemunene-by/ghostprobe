@@ -100,29 +100,39 @@ def classify_capabilities(tool: dict) -> set[str]:
     return caps
 
 
+def _scan_phrases(text: str) -> list[tuple[str, str, str]]:
+    """Every instruction-injection phrase in text as (severity, label, evidence).
+    Shared by the tool-description analyzer (MCP01) and the tool-output
+    analyzer (MCP03) so both detect the same poisoning patterns."""
+    out: list[tuple[str, str, str]] = []
+    for pat, severity, label in _INJECTION_PATTERNS:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            out.append((severity, label, _snippet(text, m.start(), m.end())))
+    return out
+
+
 def analyze_tool(tool: dict) -> list[Finding]:
     """All findings for a single tool definition."""
     name = str(tool.get("name") or "<unnamed>")
     text = _tool_text(tool)
     out: list[Finding] = []
 
-    for pat, severity, label in _INJECTION_PATTERNS:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            out.append(Finding(
-                owasp="MCP01",
-                severity=severity,
-                tool=name,
-                title=f"Tool description contains an {label}",
-                detail=(
-                    "This tool's description or parameter docs are injected into "
-                    "the agent's context with prompt-level authority. The matched "
-                    "phrasing reads as an instruction to the model, not a "
-                    "description for the user. This is the tool-poisoning pattern "
-                    "behind CVE-2025-54136."
-                ),
-                evidence=_snippet(text, m.start(), m.end()),
-            ))
+    for severity, label, evidence in _scan_phrases(text):
+        out.append(Finding(
+            owasp="MCP01",
+            severity=severity,
+            tool=name,
+            title=f"Tool description contains an {label}",
+            detail=(
+                "This tool's description or parameter docs are injected into "
+                "the agent's context with prompt-level authority. The matched "
+                "phrasing reads as an instruction to the model, not a "
+                "description for the user. This is the tool-poisoning pattern "
+                "behind CVE-2025-54136."
+            ),
+            evidence=evidence,
+        ))
 
     hidden = _hidden_unicode(text)
     if hidden:
@@ -204,6 +214,99 @@ def analyze_server(tools: list[dict]) -> list[Finding]:
         findings.append(lt)
     findings.sort(key=lambda f: (-f.rank, f.owasp, f.tool))
     return findings
+
+
+def analyze_tool_output(tool_name: str, output_text: str) -> list[Finding]:
+    """MCP03: prompt injection via tool output. A tool that returns content
+    carrying instructions is an indirect-injection path: if any part of that
+    output is attacker-influenced (a fetched web page, an email body, an issue
+    comment), the agent reads the attacker's instructions as if they were the
+    user's. The detection patterns are the same as for poisoning."""
+    out: list[Finding] = []
+    detail = (
+        "This tool returned content that reads as an instruction to the agent. "
+        "If any part of this output is attacker-influenced (a fetched page, an "
+        "email, a comment), it is an indirect prompt-injection path into the "
+        "agent, which is the most common way tool-using agents get hijacked."
+    )
+    for severity, label, evidence in _scan_phrases(output_text):
+        out.append(Finding(
+            owasp="MCP03", severity=severity, tool=tool_name,
+            title=f"Tool output contains an {label}",
+            detail=detail, evidence=evidence,
+        ))
+    hidden = _hidden_unicode(output_text)
+    if hidden:
+        kinds = sorted({k for k, _ in hidden})
+        out.append(Finding(
+            owasp="MCP03", severity="critical", tool=tool_name,
+            title="Tool output contains hidden / invisible characters",
+            detail=(
+                "Invisible Unicode (" + ", ".join(kinds) + ") in tool output "
+                "smuggles instructions to the agent that a human watching the "
+                "transcript cannot see."
+            ),
+            evidence=", ".join(f"U+{cp:04X}" for _, cp in hidden[:8]),
+        ))
+    out.sort(key=lambda f: (-f.rank, f.owasp))
+    return out
+
+
+def diff_tools(old_tools: list[dict], new_tools: list[dict]) -> list[Finding]:
+    """MCP02: rug pull / tool mutation. A server can behave until it is trusted,
+    then silently change a tool's description (to inject instructions) or add new
+    capabilities. Snapshot the toolset and diff it across time to catch this."""
+    out: list[Finding] = []
+    old_by = {str(t.get("name")): t for t in old_tools}
+    new_by = {str(t.get("name")): t for t in new_tools}
+
+    for name in sorted(new_by.keys() - old_by.keys()):
+        out.append(Finding(
+            owasp="MCP02", severity="medium", tool=name,
+            title="New tool appeared since the snapshot",
+            detail=(
+                "A server that adds tools after gaining trust can introduce "
+                "capabilities or instructions you never reviewed. Re-audit the "
+                "new tool before allowing it."
+            ),
+        ))
+    for name in sorted(old_by.keys() - new_by.keys()):
+        out.append(Finding(
+            owasp="MCP02", severity="low", tool=name,
+            title="Tool removed since the snapshot",
+            detail="A previously advertised tool is gone. Confirm this is expected.",
+        ))
+    for name in sorted(old_by.keys() & new_by.keys()):
+        o_text, n_text = _tool_text(old_by[name]), _tool_text(new_by[name])
+        if o_text != n_text:
+            introduced = len(_scan_phrases(n_text)) > len(_scan_phrases(o_text)) or (
+                _hidden_unicode(n_text) and not _hidden_unicode(o_text)
+            )
+            out.append(Finding(
+                owasp="MCP02",
+                severity="critical" if introduced else "medium",
+                tool=name,
+                title=(
+                    "Tool description mutated and introduced an injection pattern"
+                    if introduced
+                    else "Tool description changed since the snapshot"
+                ),
+                detail=(
+                    "The tool's description changed between snapshots. Silent "
+                    "mutation of a trusted tool's text is the rug-pull attack: "
+                    "the server behaves until trusted, then changes what the "
+                    "agent sees."
+                ),
+                evidence=f"was: {o_text[:70]!r} | now: {n_text[:70]!r}",
+            ))
+        if (old_by[name].get("inputSchema") or {}) != (new_by[name].get("inputSchema") or {}):
+            out.append(Finding(
+                owasp="MCP02", severity="low", tool=name,
+                title="Tool input schema changed since the snapshot",
+                detail="The parameter set changed; review for new injection sinks.",
+            ))
+    out.sort(key=lambda f: (-f.rank, f.owasp, f.tool))
+    return out
 
 
 def _snippet(text: str, start: int, end: int, pad: int = 30) -> str:
