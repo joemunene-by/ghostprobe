@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.1 — capability inventory + reliable live probing
+
+- Every scan now ends with an info-level **capability inventory**: which tools
+  give data access, an external sink, untrusted-input ingress, or code
+  execution. A quiet scan still tells you the attack surface an injection could
+  reach.
+- Fixed live `stdio` probing returning an empty error. The MCP SDK's anyio task
+  groups were being cancelled by `asyncio.wait_for`, raising a cancel-scope
+  error with no message. Now timed out with anyio's `fail_after`, default 60s,
+  with `--timeout` and `--debug` flags and exception-group-aware error output.
+
 ## v0.2.0 — rug-pull diffing (MCP02) and output-injection scanning (MCP03)
 
 - `ghostprobe diff old.json new.json` snapshots and diffs a server's toolset.

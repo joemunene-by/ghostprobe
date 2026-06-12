@@ -204,6 +204,43 @@ def lethal_trifecta(tools: list[dict]) -> Finding | None:
     return None
 
 
+_CAP_LABELS = {
+    "data": "private-data access",
+    "sink": "external sink",
+    "untrusted": "untrusted-input ingress",
+    "exec": "code/shell execution",
+}
+
+
+def capability_inventory(tools: list[dict]) -> Finding | None:
+    """An info-level map of the attack surface a server exposes to an agent.
+    None of these is a vulnerability by itself; the value is seeing the surface
+    so a quiet scan still tells you what an injection could reach."""
+    buckets: dict[str, list[str]] = {k: [] for k in _CAP_LABELS}
+    for t in tools:
+        name = str(t.get("name") or "<unnamed>")
+        for cap in classify_capabilities(t):
+            buckets[cap].append(name)
+    present = {k: v for k, v in buckets.items() if v}
+    if not present:
+        return None
+    evidence = "  |  ".join(
+        f"{_CAP_LABELS[k]}: {', '.join(sorted(set(v))[:6])}" for k, v in present.items()
+    )
+    return Finding(
+        owasp="MCP04",
+        severity="info",
+        tool="<server>",
+        title=f"Capability inventory ({len(tools)} tools)",
+        detail=(
+            "The attack surface this server exposes to an agent. None of these is "
+            "a vulnerability on its own; the risk is in the combination and in what "
+            "untrusted content can reach them."
+        ),
+        evidence=evidence,
+    )
+
+
 def analyze_server(tools: list[dict]) -> list[Finding]:
     """Full analysis of a server's advertised toolset."""
     findings: list[Finding] = []
@@ -212,6 +249,9 @@ def analyze_server(tools: list[dict]) -> list[Finding]:
     lt = lethal_trifecta(tools)
     if lt:
         findings.append(lt)
+    inv = capability_inventory(tools)
+    if inv:
+        findings.append(inv)
     findings.sort(key=lambda f: (-f.rank, f.owasp, f.tool))
     return findings
 

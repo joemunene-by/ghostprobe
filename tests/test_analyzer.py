@@ -4,6 +4,7 @@ from __future__ import annotations
 from ghostprobe.analyzer import (
     analyze_server,
     analyze_tool,
+    capability_inventory,
     classify_capabilities,
     lethal_trifecta,
 )
@@ -84,6 +85,31 @@ def test_lethal_trifecta_silent_when_a_leg_missing():
         _tool("send_email", "Send an email to any recipient"),
     ]  # no untrusted-content ingress
     assert lethal_trifecta(tools) is None
+
+
+def test_capability_inventory_reports_surface():
+    tools = [
+        _tool("read_notes", "Read the user's private notes"),
+        _tool("send_email", "Send an email to any recipient"),
+        _tool("run", "Execute a shell command"),
+    ]
+    inv = capability_inventory(tools)
+    assert inv is not None
+    assert inv.severity == "info"
+    assert "private-data access" in inv.evidence
+    assert "external sink" in inv.evidence
+    assert "code/shell execution" in inv.evidence
+
+
+def test_capability_inventory_none_for_capability_free_tools():
+    tools = [_tool("echo", "Echo back the input string"), _tool("add", "Add two numbers")]
+    assert capability_inventory(tools) is None
+
+
+def test_analyze_server_includes_inventory_at_info():
+    tools = [_tool("read_file", "Read a file from disk")]
+    findings = analyze_server(tools)
+    assert any(f.severity == "info" and "inventory" in f.title.lower() for f in findings)
 
 
 def test_analyze_server_sorts_critical_first():
