@@ -75,6 +75,24 @@ Running against a deliberately poisoned server:
     Tool exposes code or command execution
 ```
 
+### On a real server
+
+Run against the GitHub MCP server family, ghostprobe flags the documented
+GitHub-MCP exfiltration trifecta automatically:
+
+```
+[CRIT] MCP04 Lethal Trifecta  (<server>)
+    data: get_file_contents, get_pull_request_files, push_files
+    sink: add_issue_comment, create_issue, create_or_update_file
+    untrusted: get_issue, get_pull_request_comments, list_issues
+```
+
+Read a private repo, ingest attacker-controllable issue text, and write to a
+public issue: one injected issue and an auto-triage agent can leak private code.
+This is a known attack class (disclosed by Invariant Labs in 2025); the point is
+that ghostprobe detects it from the tool list alone, with no prior knowledge of
+the server.
+
 ## Honest limitations
 
 This is a black-box probe of what a server advertises. It reasons about tool *descriptions and capabilities*, not runtime behavior, so it will not catch a server that hides its true behavior behind benign-looking text, and it cannot prove a server is safe. Absence of findings is not proof of safety. Use it as one layer, alongside code review and a real gateway with runtime guardrails.
