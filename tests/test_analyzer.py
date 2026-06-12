@@ -82,6 +82,40 @@ def test_thought_history_is_not_private_data():
     assert "data" not in classify_capabilities(t)
 
 
+def test_collaborative_write_is_a_sink():
+    # Posting to a shared remote service (GitHub issue/comment) is exfiltration.
+    assert "sink" in classify_capabilities(_tool("create_issue", "Create a new issue in a repository"))
+    assert "sink" in classify_capabilities(_tool("add_issue_comment", "Add a comment to a GitHub issue"))
+    assert "sink" in classify_capabilities(_tool("push_files", "Push files to a GitHub repository"))
+
+
+def test_local_file_write_is_not_a_sink():
+    # Writing a local file is not an external/collaborative sink.
+    assert "sink" not in classify_capabilities(_tool("create_directory", "Create a new directory on disk"))
+    assert "sink" not in classify_capabilities(_tool("write_file", "Write contents to a file on disk"))
+
+
+def test_github_like_server_is_a_trifecta():
+    # The real GitHub-MCP exfiltration class: read private repo + read
+    # attacker-controllable issues + post to a public issue.
+    tools = [
+        _tool("get_file_contents", "Get the contents of a file in a repository"),
+        _tool("list_issues", "List issues in a repository"),
+        _tool("create_issue", "Create a new issue in a repository"),
+    ]
+    assert lethal_trifecta(tools) is not None
+
+
+def test_filesystem_like_server_is_not_a_trifecta():
+    # Local file tools must not be a trifecta even though they read and write.
+    tools = [
+        _tool("read_text_file", "Read the contents of a file from the file system"),
+        _tool("write_file", "Write contents to a file on disk"),
+        _tool("create_directory", "Create a directory on disk"),
+    ]
+    assert lethal_trifecta(tools) is None
+
+
 def test_lethal_trifecta_fires_when_all_three_present():
     tools = [
         _tool("read_notes", "Read the user's private notes"),

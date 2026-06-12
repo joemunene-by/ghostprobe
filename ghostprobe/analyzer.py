@@ -44,6 +44,14 @@ _INJECTION_PATTERNS: list[tuple[str, str, str]] = [
 _READ_VERBS = r"\b(read|reads|get|gets|list|lists|fetch|fetches|load|loads|open|opens|cat|search|searches|query|queries|browse|browses|scrape|scrapes|crawl|crawls|receive|receives|pull|pulls|view|views|dump|dumps|export|exports|download|downloads|retrieve|retrieves)\b"
 _SEND_VERBS = r"\b(send|sends|post|posts|put|puts|upload|uploads|push|pushes|publish|publishes|notify|notifies|forward|forwards|share|shares|tweet|tweets|deliver|delivers|transmit|transmits|emit|emits|email|emails|message|messages)\b"
 _EXTERNAL_MEDIUM = r"\b(http|https|url|urls|web|webhook|email|emails|mail|smtp|sms|slack|discord|telegram|api|remote|external|outbound|internet|network)\b"
+# A second kind of sink: writing to a shared / remote collaborative service
+# (open a GitHub issue, post a comment, push to a repo, create a Notion page)
+# is an exfiltration channel. This is distinct from writing a local file, so it
+# needs a collaborative medium, not just any write verb. Catching this is what
+# turns the GitHub server's read-private + read-issues + post-comment from
+# "no findings" into the lethal trifecta it actually is.
+_COLLAB_WRITE_VERBS = r"\b(create|creates|add|adds|post|posts|update|updates|write|writes|push|pushes|comment|comments|open|opens|submit|submits|publish|publishes|merge|merges|upload|uploads|reply|replies)\b"
+_COLLAB_MEDIUM = r"\b(issue|issues|comment|comments|pull request|pull requests|pullrequest|pr|prs|review|reviews|gist|gists|repository|repositories|repo|repos|discussion|discussions|wiki|wikis|ticket|tickets|message|messages|channel|channels|page|pages|board|boards|card|cards|thread|threads)\b"
 _PRIVATE_DATA = r"\b(file|files|directory|directories|folder|folders|note|notes|document|documents|docs|db|database|databases|sql|secret|secrets|credential|credentials|token|tokens|keychain|env|environment|password|passwords|inbox|contact|contacts|calendar|disk|filesystem)\b"
 _UNTRUSTED_SOURCE = r"\b(web|url|urls|http|https|browse|browser|scrape|crawl|rss|feed|feeds|comment|comments|issue|issues|review|reviews|inbox|email|emails|mail|message|messages|webhook|incoming|external|untrusted|page|pages|remote|internet)\b"
 # Exec needs a real execution verb plus an object, not a stray noun. "file
@@ -96,11 +104,16 @@ def classify_capabilities(tool: dict) -> set[str]:
       source required, so a pure send is not misread as input).
     - exec: runs code or shell.
     """
+    # Split underscores/hyphens so tool names like create_pull_request_review
+    # tokenize ("create pull request review") and the \b-anchored patterns match.
     blob = (str(tool.get("name") or "") + " " + _tool_text(tool)).lower()
+    blob = blob.replace("_", " ").replace("-", " ")
     caps: set[str] = set()
     if re.search(_PRIVATE_DATA, blob):
         caps.add("data")
-    if re.search(_SEND_VERBS, blob) and re.search(_EXTERNAL_MEDIUM, blob):
+    send_external = re.search(_SEND_VERBS, blob) and re.search(_EXTERNAL_MEDIUM, blob)
+    collab_write = re.search(_COLLAB_WRITE_VERBS, blob) and re.search(_COLLAB_MEDIUM, blob)
+    if send_external or collab_write:
         caps.add("sink")
     if re.search(_READ_VERBS, blob) and re.search(_UNTRUSTED_SOURCE, blob):
         caps.add("untrusted")

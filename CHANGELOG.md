@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.3 — detect collaborative-write sinks (the GitHub-MCP trifecta)
+
+Running against the GitHub server surfaced a false negative: it read private
+repo contents and attacker-controllable issue text but ghostprobe found no
+sink, so it missed the trifecta. Writing to a shared remote service (open an
+issue, post a PR comment, push to a repo) is an exfiltration channel, distinct
+from a local file write. Sink detection now covers collaborative-write verbs
+plus a collaborative medium, so the documented GitHub-MCP exfiltration class is
+flagged, while local filesystem writes correctly are not. Tool names are also
+tokenized on underscores/hyphens so `create_pull_request_review` matches.
+
+4 new tests (40 total).
+
 ## v0.2.2 — false-positive fixes from real-server runs
 
 Probing the official reference servers surfaced two false positives, now fixed:
