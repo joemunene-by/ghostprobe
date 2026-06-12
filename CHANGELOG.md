@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.2 — false-positive fixes from real-server runs
+
+Probing the official reference servers surfaced two false positives, now fixed:
+
+- `read_text_file` on the filesystem server was flagged as code execution
+  because "file system" matched a bare "system" keyword. Exec detection now
+  requires a real execution verb plus an object (run/execute a command/code/
+  shell), so reading a file is no longer mistaken for RCE.
+- `sequentialthinking` was flagged as private-data access because "thought
+  history" matched "history". Dropped "history" as a data signal.
+
+Added regression tests for both. A security tool's credibility dies on false
+positives, so these matter more than features.
+
 ## v0.2.1 — capability inventory + reliable live probing
 
 - Every scan now ends with an info-level **capability inventory**: which tools

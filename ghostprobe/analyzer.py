@@ -44,9 +44,18 @@ _INJECTION_PATTERNS: list[tuple[str, str, str]] = [
 _READ_VERBS = r"\b(read|reads|get|gets|list|lists|fetch|fetches|load|loads|open|opens|cat|search|searches|query|queries|browse|browses|scrape|scrapes|crawl|crawls|receive|receives|pull|pulls|view|views|dump|dumps|export|exports|download|downloads|retrieve|retrieves)\b"
 _SEND_VERBS = r"\b(send|sends|post|posts|put|puts|upload|uploads|push|pushes|publish|publishes|notify|notifies|forward|forwards|share|shares|tweet|tweets|deliver|delivers|transmit|transmits|emit|emits|email|emails|message|messages)\b"
 _EXTERNAL_MEDIUM = r"\b(http|https|url|urls|web|webhook|email|emails|mail|smtp|sms|slack|discord|telegram|api|remote|external|outbound|internet|network)\b"
-_PRIVATE_DATA = r"\b(file|files|directory|directories|folder|folders|note|notes|document|documents|docs|db|database|databases|sql|secret|secrets|credential|credentials|token|tokens|key|keys|keychain|env|environment|password|passwords|inbox|contact|contacts|calendar|history|local|disk|filesystem|home)\b"
+_PRIVATE_DATA = r"\b(file|files|directory|directories|folder|folders|note|notes|document|documents|docs|db|database|databases|sql|secret|secrets|credential|credentials|token|tokens|keychain|env|environment|password|passwords|inbox|contact|contacts|calendar|disk|filesystem)\b"
 _UNTRUSTED_SOURCE = r"\b(web|url|urls|http|https|browse|browser|scrape|crawl|rss|feed|feeds|comment|comments|issue|issues|review|reviews|inbox|email|emails|mail|message|messages|webhook|incoming|external|untrusted|page|pages|remote|internet)\b"
-_EXEC_PATTERN = r"\b(exec|execute|executes|run|runs|shell|bash|sh|command|commands|cmd|eval|spawn|subprocess|python|node|script|scripts|system|terminal)\b"
+# Exec needs a real execution verb plus an object, not a stray noun. "file
+# system" must not read as code execution (a real false positive from the
+# official filesystem server), so bare "system" / "terminal" are gone.
+_EXEC_PATTERN = (
+    r"\b(exec|execute|executes|executing|eval|subprocess|spawn|shell|bash|zsh|powershell)\b"
+    r"|/bin/sh\b"
+    r"|\b(run|runs|execute|executes|invoke|invokes)\s+(a\s+|an\s+|the\s+|arbitrary\s+)?"
+    r"(shell\s+|terminal\s+|system\s+|os\s+)?(command|commands|code|script|scripts|binary)\b"
+    r"|\barbitrary\s+code\b|\bcommand\s+(execution|injection)\b"
+)
 
 
 def _tool_text(tool: dict) -> str:

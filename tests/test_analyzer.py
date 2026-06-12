@@ -67,6 +67,21 @@ def test_exec_capability_flagged():
     assert any(f.owasp == "MCP05" for f in fs)
 
 
+def test_file_system_phrase_is_not_exec():
+    # Real false positive from the official filesystem server: "file system"
+    # in read_text_file's description must NOT read as code execution.
+    t = _tool("read_text_file", "Read the complete contents of a file from the file system.")
+    assert "exec" not in classify_capabilities(t)
+    assert all(f.owasp != "MCP05" for f in analyze_tool(t))
+
+
+def test_thought_history_is_not_private_data():
+    # Real false positive from the official sequential-thinking server: a
+    # "thought history" reasoning aid is not private-data access.
+    t = _tool("sequentialthinking", "Dynamic problem-solving through a thought history.")
+    assert "data" not in classify_capabilities(t)
+
+
 def test_lethal_trifecta_fires_when_all_three_present():
     tools = [
         _tool("read_notes", "Read the user's private notes"),
