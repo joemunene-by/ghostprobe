@@ -9,15 +9,23 @@ from __future__ import annotations
 
 
 def fetch_tools_stdio(
-    command: str, args: list[str], env: dict | None = None, timeout: float = 20.0
+    command: str, args: list[str], env: dict | None = None, timeout: float = 60.0
 ) -> list[dict]:
     """Connect to a stdio MCP server, list its tools, and normalise each into
-    {"name", "description", "inputSchema"}. Raises on connection failure."""
+    {"name", "description", "inputSchema"}. Raises on connection failure.
+
+    The timeout bounds the MCP handshake and tools/list, applied with anyio's
+    own ``fail_after`` rather than ``asyncio.wait_for``. Wrapping the SDK's
+    anyio task groups in ``wait_for`` raises a cross-task cancel-scope error
+    on timeout (with an empty message), so we let the one-time server spawn /
+    download run unbounded and time-box only the protocol operations.
+    """
     import asyncio
 
     async def _run() -> list[dict]:
         from contextlib import AsyncExitStack
 
+        import anyio
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -25,11 +33,12 @@ def fetch_tools_stdio(
             params = StdioServerParameters(command=command, args=args, env=env)
             read, write = await stack.enter_async_context(stdio_client(params))
             session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-            result = await session.list_tools()
+            with anyio.fail_after(timeout):
+                await session.initialize()
+                result = await session.list_tools()
             return [_normalize(t) for t in result.tools]
 
-    return asyncio.run(asyncio.wait_for(_run(), timeout=timeout))
+    return asyncio.run(_run())
 
 
 def _normalize(tool) -> dict:

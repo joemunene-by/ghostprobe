@@ -36,6 +36,25 @@ def _emit(findings, target, as_json: bool) -> None:
     print(out)
 
 
+def _format_exc(e: BaseException) -> str:
+    """Flatten an exception (unwrapping anyio/asyncio ExceptionGroups) into a
+    legible 'Type: message; Type: message' string, so an empty-message error
+    like a cancel-scope failure still names its type instead of printing blank."""
+    parts: list[str] = []
+
+    def walk(ex: BaseException) -> None:
+        if isinstance(ex, BaseExceptionGroup):
+            for sub in ex.exceptions:
+                walk(sub)
+            return
+        msg = str(ex).strip()
+        parts.append(f"{type(ex).__name__}: {msg}" if msg else type(ex).__name__)
+
+    walk(e)
+    seen = list(dict.fromkeys(parts))
+    return "; ".join(seen) if seen else repr(e)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ghostprobe",
@@ -54,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("args", nargs=argparse.REMAINDER, help="server args (use -- to separate)")
     st.add_argument("--json", action="store_true", dest="as_json")
     st.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    st.add_argument("--timeout", type=float, default=60.0, help="seconds for the MCP handshake (default 60)")
+    st.add_argument("--debug", action="store_true", help="print the full traceback on failure")
 
     so = sub.add_parser("scan-output", help="scan a tool's returned text for injection (MCP03)")
     so.add_argument("path", help="file containing the tool output text (or - for stdin)")
@@ -83,12 +104,21 @@ def main(argv: list[str] | None = None) -> int:
         args = [a for a in ns.args if a != "--"]
         try:
             from .client import fetch_tools_stdio
-            tools = fetch_tools_stdio(ns.command, args)
+            tools = fetch_tools_stdio(ns.command, args, timeout=ns.timeout)
         except ImportError:
             print("ghostprobe: live probing needs the MCP SDK. Run: pip install mcp", file=sys.stderr)
             return 2
-        except Exception as e:  # connection/handshake failures are varied
-            print(f"ghostprobe: could not probe server: {e}", file=sys.stderr)
+        except BaseException as e:  # anyio/subprocess failures are varied
+            if ns.debug:
+                import traceback
+                traceback.print_exc()
+            print(f"ghostprobe: could not probe server: {_format_exc(e)}", file=sys.stderr)
+            print(
+                "  hints: the first npx run downloads the server (slow); a wrong "
+                "command or missing args also lands here. Re-run with --debug for "
+                "the full traceback, or --timeout 120.",
+                file=sys.stderr,
+            )
             return 2
         target = " ".join([ns.command, *args])
         findings = analyze_server(tools)
