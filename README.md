@@ -1,11 +1,14 @@
 # ghostprobe
 
-A dynamic red-team probe for **Model Context Protocol (MCP) servers**, mapped to the OWASP MCP Top 10.
+A dynamic red-team probe for **Model Context Protocol (MCP) servers**, mapped to the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top-10/).
 
 Point it at a server (or a saved `tools/list` dump) and it finds the things that actually get agents owned: **tool poisoning**, hidden-instruction smuggling, dangerous capabilities, and the **lethal trifecta** that turns a single prompt injection into a data leak.
 
+Not on PyPI yet, so install from source:
+
 ```
-pip install ghostprobe          # core analyzer, zero dependencies
+pip install "git+https://github.com/joemunene-by/ghostprobe.git"   # core analyzer, zero deps
+pip install mcp                                                    # only needed to probe a live server
 ghostprobe scan-file tools.json
 ```
 
@@ -41,7 +44,7 @@ ghostprobe scan-file tools.json --json
 ghostprobe scan-file tools.json --fail-on high   # exit 1 for CI gating
 ```
 
-Probe a live stdio MCP server (needs the MCP SDK: `pip install "ghostprobe[live]"`):
+Probe a live stdio MCP server (needs the MCP SDK: `pip install mcp`):
 
 ```
 ghostprobe stdio -- npx -y @some/mcp-server
@@ -55,6 +58,18 @@ Catch a rug pull by diffing two snapshots taken over time, and scan a tool's ret
 ghostprobe diff yesterday.json today.json --fail-on critical
 ghostprobe scan-output tool_response.txt --tool fetch_url
 ```
+
+For the `diff`, you supply the snapshots: dump a server's `tools/list` on a schedule (a weekly cron job writing `ghostprobe stdio --json ... > .ghostprobe/$(date +%F).json` into your repo) and diff the latest two.
+
+### Tuning out expected findings in CI
+
+Every finding prints a stable `[id ...]`. To stop seeing findings you have reviewed and accepted, put their ids in a JSON file and pass `--allowlist`. Tune once, and CI only fails on something new:
+
+```
+ghostprobe scan-file tools.json --allowlist .ghostprobe/allow.json --fail-on high
+```
+
+The allowlist is a JSON list of ids (`["a1b2c3d4", ...]`) or `{"suppress": [...]}`. Ids are stable across runs and ignore incidental count changes.
 
 ## Example
 
@@ -95,7 +110,9 @@ the server.
 
 ## Honest limitations
 
-This is a black-box probe of what a server advertises. It reasons about tool *descriptions and capabilities*, not runtime behavior, so it will not catch a server that hides its true behavior behind benign-looking text, and it cannot prove a server is safe. Absence of findings is not proof of safety. Use it as one layer, alongside code review and a real gateway with runtime guardrails.
+This is a black-box probe of what a server advertises. **Classification is heuristic: keyword and pattern matching over tool names and descriptions, not runtime behavior.** That means it can miss a server that hides its true behavior behind benign-looking text, and it will occasionally over- or under-classify a capability (tune those out with `--allowlist`). It cannot prove a server is safe; absence of findings is not proof of safety. Use it as one layer, alongside code review and a real gateway with runtime guardrails.
+
+The OWASP MCP Top 10 is itself a young, beta-stage framework, so its categories are stable enough to map to but the numbering may still shift.
 
 ## Roadmap
 

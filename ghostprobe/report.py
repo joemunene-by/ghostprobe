@@ -34,13 +34,26 @@ def render_text(findings: list[Finding], target: str) -> str:
     lines.append(f"{len(findings)} finding(s)   {summary}")
     lines.append("")
     for f in findings:
-        lines.append(f"{_ICON.get(f.severity, '[????]')} {f.owasp} {f.category}  ({f.tool})")
+        lines.append(
+            f"{_ICON.get(f.severity, '[????]')} {f.owasp} {f.category}  "
+            f"({f.tool})  [id {f.fingerprint}]"
+        )
         lines.append(f"    {f.title}")
         lines.append(f"    {f.detail}")
         if f.evidence:
             lines.append(f"    evidence: {f.evidence}")
         lines.append("")
     return "\n".join(lines)
+
+
+def apply_allowlist(findings: list[Finding], allow: set[str]) -> tuple[list[Finding], int]:
+    """Drop findings whose fingerprint is in ``allow``. Returns the kept
+    findings and how many were suppressed, so teams can tune once in CI and
+    stop seeing expected findings."""
+    if not allow:
+        return findings, 0
+    kept = [f for f in findings if f.fingerprint not in allow]
+    return kept, len(findings) - len(kept)
 
 
 def render_json(findings: list[Finding], target: str) -> str:

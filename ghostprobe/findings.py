@@ -1,6 +1,8 @@
 """Findings model and the OWASP MCP Top 10 mapping ghostprobe reports against."""
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 
 # OWASP MCP Top 10 (2026) categories ghostprobe maps its findings to. We cover
@@ -35,8 +37,18 @@ class Finding:
     def rank(self) -> int:
         return SEVERITY_ORDER.get(self.severity, 0)
 
+    @property
+    def fingerprint(self) -> str:
+        """A stable short id for this finding, for allowlisting. Based on the
+        category, tool, and title with digits normalised, so an unrelated count
+        change (e.g. "14 tools" -> "15 tools") does not shift the id."""
+        title_norm = re.sub(r"\d+", "#", self.title)
+        raw = f"{self.owasp}|{self.tool}|{title_norm}"
+        return hashlib.sha1(raw.encode()).hexdigest()[:8]
+
     def to_dict(self) -> dict:
         return {
+            "id": self.fingerprint,
             "owasp": self.owasp,
             "category": self.category,
             "severity": self.severity,

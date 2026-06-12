@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0 — allowlist suppression + review-driven docs
+
+Acting on external review:
+
+- Every finding now has a stable short `id` (a fingerprint over category, tool,
+  and digit-normalised title). Pass `--allowlist <file>` on any command to
+  suppress reviewed findings by id, so teams tune once and CI only fails on
+  something new. Works across scan-file, stdio, scan-output, and diff.
+- README fixes: install is now the correct from-source command (not the
+  unpublished `pip install ghostprobe`); classification is stated explicitly as
+  keyword/pattern heuristic, not runtime behavior; the OWASP MCP Top 10 is
+  linked and noted as a beta framework; the `diff` snapshot workflow is
+  documented.
+- 7 new tests (47 total).
+
 ## v0.2.3 — detect collaborative-write sinks (the GitHub-MCP trifecta)
 
 Running against the GitHub server surfaced a false negative: it read private

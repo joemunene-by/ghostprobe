@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import __version__
 from .analyzer import analyze_server, analyze_tool_output, diff_tools
-from .report import exit_code, render_json, render_text
+from .report import apply_allowlist, exit_code, render_json, render_text
 
 
 def load_tools_file(path: str) -> list[dict]:
@@ -31,9 +31,35 @@ def load_tools_file(path: str) -> list[dict]:
     return data
 
 
+def load_allowlist(path: str | None) -> set[str]:
+    """Load finding fingerprints to suppress. The file is a JSON list of id
+    strings, or an object with a "suppress" list. Empty set if no path."""
+    if not path:
+        return set()
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        data = data.get("suppress", [])
+    return {str(x) for x in data}
+
+
 def _emit(findings, target, as_json: bool) -> None:
     out = render_json(findings, target) if as_json else render_text(findings, target)
     print(out)
+
+
+def _finish(findings, target, ns) -> int:
+    """Apply the allowlist, emit, and return the CI exit code. Shared by every
+    command so --allowlist and --fail-on behave identically everywhere."""
+    try:
+        allow = load_allowlist(getattr(ns, "allowlist", None))
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        print(f"ghostprobe: cannot read allowlist: {e}", file=sys.stderr)
+        return 2
+    findings, suppressed = apply_allowlist(findings, allow)
+    if suppressed and not ns.as_json:
+        print(f"({suppressed} finding(s) suppressed by allowlist)", file=sys.stderr)
+    _emit(findings, target, ns.as_json)
+    return exit_code(findings, ns.fail_on)
 
 
 def _format_exc(e: BaseException) -> str:
@@ -67,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     sf.add_argument("path")
     sf.add_argument("--json", action="store_true", dest="as_json")
     sf.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    sf.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
     st = sub.add_parser("stdio", help="probe a live stdio MCP server (needs: pip install mcp)")
     st.add_argument("command", help="server command, e.g. npx")
@@ -75,18 +102,21 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
     st.add_argument("--timeout", type=float, default=60.0, help="seconds for the MCP handshake (default 60)")
     st.add_argument("--debug", action="store_true", help="print the full traceback on failure")
+    st.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
     so = sub.add_parser("scan-output", help="scan a tool's returned text for injection (MCP03)")
     so.add_argument("path", help="file containing the tool output text (or - for stdin)")
     so.add_argument("--tool", default="<output>", help="tool name, for the report")
     so.add_argument("--json", action="store_true", dest="as_json")
     so.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    so.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
     df = sub.add_parser("diff", help="diff two tools/list snapshots for rug pulls (MCP02)")
     df.add_argument("old", help="earlier tools/list JSON")
     df.add_argument("new", help="later tools/list JSON")
     df.add_argument("--json", action="store_true", dest="as_json")
     df.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    df.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
     ns = ap.parse_args(argv)
 
@@ -97,8 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ghostprobe: cannot read tools from {ns.path}: {e}", file=sys.stderr)
             return 2
         findings = analyze_server(tools)
-        _emit(findings, ns.path, ns.as_json)
-        return exit_code(findings, ns.fail_on)
+        return _finish(findings, ns.path, ns)
 
     if ns.cmd == "stdio":
         args = [a for a in ns.args if a != "--"]
@@ -122,8 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         target = " ".join([ns.command, *args])
         findings = analyze_server(tools)
-        _emit(findings, target, ns.as_json)
-        return exit_code(findings, ns.fail_on)
+        return _finish(findings, target, ns)
 
     if ns.cmd == "scan-output":
         try:
@@ -132,8 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ghostprobe: cannot read {ns.path}: {e}", file=sys.stderr)
             return 2
         findings = analyze_tool_output(ns.tool, text)
-        _emit(findings, f"output of {ns.tool}", ns.as_json)
-        return exit_code(findings, ns.fail_on)
+        return _finish(findings, f"output of {ns.tool}", ns)
 
     if ns.cmd == "diff":
         try:
@@ -143,8 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ghostprobe: cannot read snapshots: {e}", file=sys.stderr)
             return 2
         findings = diff_tools(old_tools, new_tools)
-        _emit(findings, f"{ns.old} -> {ns.new}", ns.as_json)
-        return exit_code(findings, ns.fail_on)
+        return _finish(findings, f"{ns.old} -> {ns.new}", ns)
 
     return 0
 
