@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostprobe"
+version = "0.1.0"
+description = "Dynamic red-team probe for MCP servers, mapped to the OWASP MCP Top 10."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Joe Munene", email = "joemunene984@gmail.com" }]
+keywords = ["mcp", "security", "red-team", "prompt-injection", "owasp", "llm", "agents"]
+
+[project.optional-dependencies]
+# Only needed to probe a *live* server. The analyzer + scan-file work without it.
+live = ["mcp>=1.0"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+ghostprobe = "ghostprobe.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/joemunene-by/ghostprobe"
+
+[tool.setuptools.packages.find]
+include = ["ghostprobe*"]
