@@ -4,11 +4,9 @@ A dynamic red-team probe for **Model Context Protocol (MCP) servers**, mapped to
 
 Point it at a server (or a saved `tools/list` dump) and it finds the things that actually get agents owned: **tool poisoning**, hidden-instruction smuggling, dangerous capabilities, and the **lethal trifecta** that turns a single prompt injection into a data leak.
 
-Not on PyPI yet, so install from source:
-
 ```
-pip install "git+https://github.com/joemunene-by/ghostprobe.git"   # core analyzer, zero deps
-pip install mcp                                                    # only needed to probe a live server
+pip install ghostprobe            # core analyzer, zero dependencies
+pip install "ghostprobe[live]"    # add live MCP-server probing (the MCP SDK)
 ghostprobe scan-file tools.json
 ```
 
@@ -44,7 +42,7 @@ ghostprobe scan-file tools.json --json
 ghostprobe scan-file tools.json --fail-on high   # exit 1 for CI gating
 ```
 
-Probe a live stdio MCP server (needs the MCP SDK: `pip install mcp`):
+Probe a live stdio MCP server (needs the MCP SDK: `pip install "ghostprobe[live]"`):
 
 ```
 ghostprobe stdio -- npx -y @some/mcp-server
