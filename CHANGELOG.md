@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.4.0 — MCP06-10 coverage (full OWASP MCP Top 10)
+
+ghostprobe now maps to all ten OWASP MCP categories. MCP06-10 are the ones the
+standard itself frames as largely runtime properties, so coverage is scoped to
+the subset that is statically observable from the advertised tool surface, and
+each detector documents the runtime-only gap it does not close.
+
+- MCP06 Auth / Token Handling: flags hardcoded secrets, tokens, API keys, JWTs
+  and private keys baked into tool text or a schema default. Stands down for
+  tools that document a proper auth handshake instead of embedding a key.
+- MCP07 Insecure Transport: flags plaintext http:// or ws:// endpoints
+  advertised in tool text or schema, excluding localhost (normal for a local
+  server).
+- MCP08 Confused Deputy / Consent: flags auto-approve, skip-confirmation, and
+  act-on-behalf language, and stands down when a consent marker is present so a
+  tool that documents its own gating is not flagged.
+- MCP09 Supply Chain: flags unpinned version references (latest / * / floating
+  ranges) and tool names within one or two edits of an official reference
+  server (typosquat). Post-install tool mutation stays covered by MCP02.
+- MCP10 Resource Exhaustion: flags unbounded or large fan-out operations
+  (recursive / scan-all / entire-store) that expose no limit, page-size, or
+  timeout parameter to rein them in.
+
+The detectors read a wider static surface than the MCP01-05 checks: tool name,
+all description text, schema property names, defaults, formats and enums, plus
+any top-level metadata keys a server attaches. Honest-by-default: each stands
+down on a mitigating signal so it flags footprints, not vocabulary.
+
+21 new tests (68 total).
+
 ## v0.3.0 — allowlist suppression + review-driven docs
 
 Acting on external review:

@@ -65,6 +65,98 @@ _EXEC_PATTERN = (
     r"|\barbitrary\s+code\b|\bcommand\s+(execution|injection)\b"
 )
 
+# --------------------------------------------------------------------------
+# MCP06-10 static signals.
+#
+# Honesty note: the OWASP MCP standard frames MCP06 (auth/token), MCP07
+# (transport), MCP08 (consent), MCP09 (supply chain) and MCP10 (DoS) as mostly
+# RUNTIME properties: OAuth flow inspection, TLS probing, host consent UX,
+# package provenance, and live resource measurement. ghostprobe is a black-box
+# probe of an advertised tool surface, so it cannot observe those directly.
+#
+# What it CAN do, and all it claims to do here, is flag the statically
+# observable footprints of each risk inside the surface a server advertises:
+# the tool name, descriptions, parameter docs, and schema values (defaults,
+# formats, enums) plus any top-level metadata keys the server attaches. Each
+# detector below documents the residual runtime-only gap it does not cover.
+# --------------------------------------------------------------------------
+
+# MCP06: a literal secret/token/credential baked into advertised text or a
+# schema default. A hardcoded credential a server hands the model is leaked the
+# moment the tool list is fetched, and signals tokens are not handled through a
+# proper auth flow. We match well-known token shapes plus credential-bearing
+# default values, not the bare word "token" (which is normal in auth tooling).
+_SECRET_PATTERNS: list[tuple[str, str]] = [
+    (r"\b(sk-[A-Za-z0-9]{16,}|sk-proj-[A-Za-z0-9_-]{16,})\b", "OpenAI-style API key"),
+    (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "GitHub token"),
+    (r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b", "Slack token"),
+    (r"\bAKIA[0-9A-Z]{16}\b", "AWS access key id"),
+    (r"\bAIza[0-9A-Za-z_-]{20,}\b", "Google API key"),
+    (r"\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b", "JWT"),
+    (r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----", "private key"),
+    (r"(?i)\b(api[_-]?key|secret|password|passwd|token|bearer|access[_-]?key)\b\s*[:=]\s*['\"]?[A-Za-z0-9._\-/+]{12,}", "credential assignment"),
+]
+
+# MCP07: an insecure transport endpoint advertised in tool text or schema. A
+# plaintext http:// or ws:// URL (not pointing at localhost) is interception-
+# and impersonation-exposed. localhost/127.0.0.1 over http is normal for a
+# local server, so it is excluded.
+_INSECURE_TRANSPORT = re.compile(
+    r"\b(?:http|ws)://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])[\w.-]+",
+    re.IGNORECASE,
+)
+
+# MCP08: consent-bypass language. Text that tells the agent to act on the
+# user's behalf automatically, skip confirmation, or remember an approval is a
+# confused-deputy footprint: a sensitive action proceeds with no fresh consent.
+_CONSENT_BYPASS: list[tuple[str, str]] = [
+    (r"\bauto[-\s]?(approve|approv\w*|confirm\w*|accept\w*|execute\w*|run\w*)\b", "auto-approval language"),
+    (r"\bwithout\s+(asking|confirming|confirmation|prompting|user\s+(approval|consent|confirmation))\b", "consent-skip language"),
+    (r"\bno\s+(confirmation|approval|consent|prompt)\s+(is\s+)?(required|needed|necessary)\b", "consent-skip language"),
+    (r"\b(skip|bypass|suppress)\s+(the\s+)?(confirmation|approval|consent|permission)\b", "consent-skip language"),
+    (r"\b(remember|persist|save)\s+(this\s+|the\s+)?(approval|consent|permission)\b", "remembered-approval language"),
+    (r"\bon\s+behalf\s+of\s+the\s+user\b", "act-on-behalf language"),
+    (r"\bdo(es)?\s+not\s+require\s+(user\s+)?(approval|confirmation|consent)\b", "consent-skip language"),
+]
+# A consent marker nearby means the server is being explicit about asking; if
+# present we stand down, to avoid flagging tools that document their own gating.
+_CONSENT_MARKER = re.compile(
+    r"\b(require[s]?\s+(user\s+)?(approval|confirmation|consent)|"
+    r"ask[s]?\s+the\s+user|human[-\s]in[-\s]the[-\s]loop|prompt[s]?\s+for\s+(approval|confirmation|consent))\b",
+    re.IGNORECASE,
+)
+
+# MCP09 (supply chain): an unpinned version reference in advertised metadata.
+# "latest" / "*" / a caret/tilde range means the server can silently update.
+_UNPINNED_VERSION = re.compile(
+    r"(?i)\b(?:version|tag|ref)\s*[:=]\s*['\"]?(latest|\*|main|master|\^|~)|"
+    r"@(?:latest|\*)\b|:latest\b"
+)
+# Names that look like a typosquat of an official reference server. The list is
+# the @modelcontextprotocol reference servers; a name that is close-but-not-equal
+# (edit distance 1-2, or a confusable suffix) is a provenance red flag.
+_OFFICIAL_REF_SERVERS = (
+    "filesystem", "fetch", "git", "github", "gitlab", "memory",
+    "everything", "sequentialthinking", "time", "sqlite", "postgres",
+    "puppeteer", "brave-search", "google-maps", "slack", "sentry",
+)
+
+# MCP10 (DoS): a tool that advertises an unbounded / large fan-out operation
+# with no bound, limit, max, or timeout anywhere in its surface.
+_UNBOUNDED_OP = re.compile(
+    r"\b(all\s+(files|records|rows|pages|results|items|entries|users|repositories|repos|messages)"
+    r"|every\s+(file|record|row|page|result|item|entry)"
+    r"|entire\s+(database|filesystem|repository|repo|directory|tree|disk|history)"
+    r"|recursive(ly)?|unlimited|unbounded|no\s+limit|without\s+(a\s+)?limit"
+    r"|whole\s+(database|repository|repo|disk|filesystem))\b",
+    re.IGNORECASE,
+)
+_BOUND_MARKER = re.compile(
+    r"\b(limit|max|maximum|page[_\s-]?size|per[_\s-]?page|timeout|rate[_\s-]?limit"
+    r"|count|top|batch[_\s-]?size|cap|bound|offset|cursor|first|last|head|tail)\b",
+    re.IGNORECASE,
+)
+
 
 def _tool_text(tool: dict) -> str:
     """All human-language text a tool contributes to the model's context:
@@ -77,6 +169,39 @@ def _tool_text(tool: dict) -> str:
             for p in props.values():
                 if isinstance(p, dict) and p.get("description"):
                     parts.append(str(p["description"]))
+    return "\n".join(x for x in parts if x)
+
+
+def _schema_props(tool: dict) -> dict:
+    """The inputSchema properties dict, normalised, or {}."""
+    schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    if isinstance(schema, dict):
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            return props
+    return {}
+
+
+def _tool_surface(tool: dict) -> str:
+    """Every static string a tool advertises that the MCP06-10 detectors read:
+    name, all description text, plus property names, defaults, enum values and
+    formats from the input schema. Distinct from `_tool_text` (model-context
+    text only) because supply-chain / transport / token signals live in schema
+    values and metadata, not just human-language descriptions."""
+    parts = [str(tool.get("name") or ""), _tool_text(tool)]
+    # Top-level metadata keys some servers attach alongside the three core
+    # fields (version, transport, url, endpoint, homepage, ...). We stringify
+    # them so an http:// endpoint or an unpinned version is visible statically.
+    for k, v in tool.items():
+        if k in ("name", "description", "inputSchema", "input_schema"):
+            continue
+        parts.append(f"{k}={v!r}")
+    for pname, p in _schema_props(tool).items():
+        parts.append(str(pname))
+        if isinstance(p, dict):
+            for key in ("default", "format", "pattern", "examples", "enum", "const"):
+                if key in p:
+                    parts.append(f"{key}={p[key]!r}")
     return "\n".join(x for x in parts if x)
 
 
@@ -188,7 +313,194 @@ def analyze_tool(tool: dict) -> list[Finding]:
             evidence="",
         ))
 
+    # MCP06-10: statically observable footprints on this tool's surface.
+    out.extend(detect_insecure_token_handling(tool))
+    out.extend(detect_insecure_transport(tool))
+    out.extend(detect_consent_bypass(tool))
+    out.extend(detect_supply_chain(tool))
+    out.extend(detect_resource_exhaustion(tool))
+
     return out
+
+
+def _edit_distance_le(a: str, b: str, k: int) -> bool:
+    """True iff Levenshtein(a, b) <= k. Short-circuits on length gap. Used to
+    spot typosquats of the official reference-server names."""
+    if abs(len(a) - len(b)) > k:
+        return False
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1] <= k
+
+
+def detect_insecure_token_handling(tool: dict) -> list[Finding]:
+    """MCP06 (static subset): a literal secret/token/credential exposed in a
+    tool's advertised text or a schema default.
+
+    Runtime gap: ghostprobe does NOT inspect OAuth scopes, token audience,
+    token binding, or storage. Those need live auth-flow inspection. This only
+    catches a credential a server hardcodes into its advertised surface, which
+    is leaked to the model the instant the tool list is fetched."""
+    name = str(tool.get("name") or "<unnamed>")
+    surface = _tool_surface(tool)
+    out: list[Finding] = []
+    seen: set[str] = set()
+    for pat, label in _SECRET_PATTERNS:
+        m = re.search(pat, surface)
+        if m and label not in seen:
+            seen.add(label)
+            out.append(Finding(
+                owasp="MCP06", severity="critical", tool=name,
+                title=f"Hardcoded secret in tool surface ({label})",
+                detail=(
+                    "A credential is baked into this tool's advertised text or a "
+                    "schema default. It is exposed to the agent the moment the "
+                    "tool list is fetched, and signals tokens are not brokered "
+                    "through a proper auth flow. Rotate the secret and move it to "
+                    "a runtime auth handshake. (Static check: ghostprobe does not "
+                    "inspect OAuth scopes, audience, or binding.)"
+                ),
+                evidence=_snippet(surface, m.start(), m.end()),
+            ))
+    return out
+
+
+def detect_insecure_transport(tool: dict) -> list[Finding]:
+    """MCP07 (static subset): a plaintext http:// or ws:// endpoint advertised
+    in tool text or schema (excluding localhost).
+
+    Runtime gap: ghostprobe connects to stdio servers and does not probe TLS,
+    server authentication, origin-header validation, or DNS-rebinding defenses
+    on a live HTTP/SSE transport. This only flags an insecure endpoint a server
+    advertises statically in its tool surface."""
+    name = str(tool.get("name") or "<unnamed>")
+    surface = _tool_surface(tool)
+    m = _INSECURE_TRANSPORT.search(surface)
+    if not m:
+        return []
+    return [Finding(
+        owasp="MCP07", severity="high", tool=name,
+        title="Insecure transport endpoint advertised",
+        detail=(
+            "This tool advertises a plaintext http:// or ws:// endpoint. Without "
+            "TLS the transport is open to interception and the server cannot be "
+            "authenticated, so the toolset an agent receives can be tampered "
+            "with. Use https/wss and validate the origin. (Static check: "
+            "ghostprobe does not actively probe TLS or origin validation.)"
+        ),
+        evidence=_snippet(surface, m.start(), m.end()),
+    )]
+
+
+def detect_consent_bypass(tool: dict) -> list[Finding]:
+    """MCP08 (static subset): auto-approve / act-on-behalf language with no
+    consent marker, the confused-deputy footprint.
+
+    Runtime gap: ghostprobe does not evaluate the HOST's consent UX, whether a
+    prompt shows the concrete action, or how remembered approvals are scoped.
+    This only flags a tool that advertises skipping consent in its own text."""
+    name = str(tool.get("name") or "<unnamed>")
+    text = _tool_text(tool)
+    if _CONSENT_MARKER.search(text):
+        return []
+    for pat, label in _CONSENT_BYPASS:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            return [Finding(
+                owasp="MCP08", severity="high", tool=name,
+                title=f"Consent-bypass language in tool description ({label})",
+                detail=(
+                    "This tool's text tells the agent to act without a fresh "
+                    "consent prompt. The agent holds the user's authority, so a "
+                    "tool that auto-approves or acts on the user's behalf is a "
+                    "confused-deputy path: a later malicious call proceeds with "
+                    "no human in the loop. Require per-call approval for "
+                    "sensitive actions. (Static check: ghostprobe does not see "
+                    "the host's actual consent flow.)"
+                ),
+                evidence=_snippet(text, m.start(), m.end()),
+            )]
+    return []
+
+
+def detect_supply_chain(tool: dict) -> list[Finding]:
+    """MCP09 (static subset): unpinned version metadata and typosquat-like
+    names versus the official reference servers.
+
+    Runtime gap: ghostprobe does not verify package signatures, provenance, or
+    the dependency tree, and does not confirm the launch command. Post-install
+    tool mutation is covered separately by MCP02 diffing. This only flags
+    static provenance smells in the advertised surface."""
+    name = str(tool.get("name") or "<unnamed>")
+    out: list[Finding] = []
+    surface = _tool_surface(tool)
+
+    m = _UNPINNED_VERSION.search(surface)
+    if m:
+        out.append(Finding(
+            owasp="MCP09", severity="medium", tool=name,
+            title="Unpinned version reference in tool metadata",
+            detail=(
+                "An unpinned version (latest / * / a floating range) lets the "
+                "server silently update to code you never reviewed, a supply-"
+                "chain risk. Pin to an exact version or digest. (Static check: "
+                "ghostprobe does not verify package signatures or provenance.)"
+            ),
+            evidence=_snippet(surface, m.start(), m.end()),
+        ))
+
+    low = name.lower().replace("_", "-")
+    base = low.rsplit("-", 1)[-1] if "-" in low else low
+    for ref in _OFFICIAL_REF_SERVERS:
+        for cand in {low, base}:
+            if cand and cand != ref and _edit_distance_le(cand, ref, 2 if len(ref) > 6 else 1):
+                out.append(Finding(
+                    owasp="MCP09", severity="medium", tool=name,
+                    title="Tool name resembles an official reference server (possible typosquat)",
+                    detail=(
+                        f"This tool's name is one or two edits from the official "
+                        f"'{ref}' reference server. Typosquatting an established "
+                        "name is a distribution attack that rides the trust of "
+                        "the original. Confirm provenance before installing. "
+                        "(Static check: name-similarity heuristic, not a "
+                        "registry/provenance lookup.)"
+                    ),
+                    evidence=f"{name!r} vs official {ref!r}",
+                ))
+                return out  # one typosquat finding per tool is enough
+    return out
+
+
+def detect_resource_exhaustion(tool: dict) -> list[Finding]:
+    """MCP10 (static subset): an unbounded / large fan-out operation advertised
+    with no bound, limit, or timeout anywhere in its surface.
+
+    Runtime gap: ghostprobe does not MEASURE output size, execution time, or
+    rate limits. Enforcement of bounds is a runtime policy property. This only
+    flags a tool that advertises an unbounded operation and exposes no bounding
+    parameter to rein it in."""
+    name = str(tool.get("name") or "<unnamed>")
+    surface = _tool_surface(tool)
+    m = _UNBOUNDED_OP.search(surface)
+    if not m or _BOUND_MARKER.search(surface):
+        return []
+    return [Finding(
+        owasp="MCP10", severity="medium", tool=name,
+        title="Unbounded operation with no advertised limit",
+        detail=(
+            "This tool advertises an unbounded or large fan-out operation "
+            "(scan-all / recursive / entire-store) and exposes no limit, max, "
+            "page-size, or timeout parameter to bound it. An agent can exhaust "
+            "host resources, flood its own context, and run up cost. Add an "
+            "enforced per-call cap and a timeout. (Static check: ghostprobe "
+            "does not measure runtime output size or rate limits.)"
+        ),
+        evidence=_snippet(surface, m.start(), m.end()),
+    )]
 
 
 def lethal_trifecta(tools: list[dict]) -> Finding | None:

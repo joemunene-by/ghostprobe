@@ -7,12 +7,19 @@ from dataclasses import dataclass
 
 # OWASP MCP Top 10 (2026) categories ghostprobe maps its findings to. We cover
 # the subset a dynamic black-box probe can actually observe from the outside.
+# MCP06-10 are covered for their statically-observable signals only; the
+# runtime-only residue of each is documented in analyzer.py and the README.
 OWASP_MCP = {
     "MCP01": "Tool Poisoning",
     "MCP02": "Rug Pull / Tool Mutation",
     "MCP03": "Prompt Injection via Tool Output",
     "MCP04": "Excessive Capability / Lethal Trifecta",
     "MCP05": "Sensitive Capability Exposure",
+    "MCP06": "Insecure Authorization / Token Handling",
+    "MCP07": "Insecure Transport / Server Authentication",
+    "MCP08": "Confused Deputy / Consent Bypass",
+    "MCP09": "Supply-Chain / Distribution Risk",
+    "MCP10": "Resource Exhaustion / Denial of Service",
 }
 
 SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
