@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghostprobe"
-version = "0.3.0"
+version = "0.4.0"
 description = "Dynamic red-team probe for MCP servers, mapped to the OWASP MCP Top 10."
 readme = "README.md"
 requires-python = ">=3.10"
