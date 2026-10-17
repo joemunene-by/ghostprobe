@@ -2,6 +2,7 @@
 
   ghostprobe scan-file tools.json           analyse a saved tools/list dump
   ghostprobe stdio -- npx -y some-mcp        probe a live stdio MCP server
+  ghostprobe canary -- npx -y some-mcp       call read-only tools, scan real output
   ghostprobe ... --json                      machine-readable output
   ghostprobe ... --fail-on high              exit 1 if a finding >= severity
 """
@@ -111,6 +112,18 @@ def main(argv: list[str] | None = None) -> int:
     so.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
     so.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
+    cn = sub.add_parser(
+        "canary",
+        help="actively call a live server's read-only tools with a planted marker (needs: pip install mcp)",
+    )
+    cn.add_argument("command", help="server command, e.g. npx")
+    cn.add_argument("args", nargs=argparse.REMAINDER, help="server args (use -- to separate)")
+    cn.add_argument("--json", action="store_true", dest="as_json")
+    cn.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    cn.add_argument("--timeout", type=float, default=60.0, help="seconds per MCP operation (default 60)")
+    cn.add_argument("--debug", action="store_true", help="print the full traceback on failure")
+    cn.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
+
     df = sub.add_parser("diff", help="diff two tools/list snapshots for rug pulls (MCP02)")
     df.add_argument("old", help="earlier tools/list JSON")
     df.add_argument("new", help="later tools/list JSON")
@@ -151,6 +164,41 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         target = " ".join([ns.command, *args])
         findings = analyze_server(tools)
+        return _finish(findings, target, ns)
+
+    if ns.cmd == "canary":
+        args = [a for a in ns.args if a != "--"]
+        target = " ".join([ns.command, *args])
+        print(
+            f"ghostprobe: canary probe will CALL the read-only tools on '{target}'. "
+            "Tools that send data out or run code are skipped.",
+            file=sys.stderr,
+        )
+        try:
+            from .client import probe_live_stdio
+            results = probe_live_stdio(ns.command, args, timeout=ns.timeout)
+        except ImportError:
+            print("ghostprobe: live probing needs the MCP SDK. Run: pip install mcp", file=sys.stderr)
+            return 2
+        except BaseException as e:  # anyio/subprocess failures are varied
+            if ns.debug:
+                import traceback
+                traceback.print_exc()
+            print(f"ghostprobe: could not probe server: {_format_exc(e)}", file=sys.stderr)
+            print(
+                "  hints: the first npx run downloads the server (slow); a wrong "
+                "command or missing args also lands here. Re-run with --debug for "
+                "the full traceback, or --timeout 120.",
+                file=sys.stderr,
+            )
+            return 2
+        called = [r["tool"] for r in results if r["called"]]
+        skipped = [(r["tool"], r["reason"]) for r in results if not r["called"]]
+        print(f"ghostprobe: called {len(called)}, skipped {len(skipped)} of {len(results)} tools", file=sys.stderr)
+        for name, reason in skipped:
+            print(f"  skipped {name}: {reason}", file=sys.stderr)
+        from .analyzer import analyze_canary
+        findings = analyze_canary(results)
         return _finish(findings, target, ns)
 
     if ns.cmd == "scan-output":

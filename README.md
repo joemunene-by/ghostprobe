@@ -55,6 +55,14 @@ Probe a live stdio MCP server (needs the MCP SDK: `pip install "ghostprobe[live]
 ghostprobe stdio -- npx -y @some/mcp-server
 ```
 
+`stdio` reads the advertised surface. To probe actual behavior, `canary` goes a step further: it calls the server's read-only tools with a unique marker planted in their string inputs, then scans what each one really returns.
+
+```
+ghostprobe canary -- npx -y @some/mcp-server
+```
+
+It only calls tools that read. Anything that sends data to an external medium or runs code is skipped (its risk is already covered by the static scan), and a tool needing a non-string required argument is skipped rather than called with a guessed value. On the real output it runs the MCP03 injection and hidden-character scan, and if the marker planted in one tool's input surfaces in another tool's output it flags that cross-tool capture (MCP04), something a surface scan cannot see. It prints what it called and skipped to stderr.
+
 The `tools.json` for `scan-file` can be a bare list, an MCP `tools/list` result (`{"tools": [...]}`), or a raw JSON-RPC envelope.
 
 Catch a rug pull by diffing two snapshots taken over time, and scan a tool's returned text for indirect injection:
@@ -115,7 +123,7 @@ the server.
 
 ## Honest limitations
 
-This is a black-box probe of what a server advertises. **Classification is heuristic: keyword and pattern matching over tool names and descriptions, not runtime behavior.** That means it can miss a server that hides its true behavior behind benign-looking text, and it will occasionally over- or under-classify a capability (tune those out with `--allowlist`). It cannot prove a server is safe; absence of findings is not proof of safety. Use it as one layer, alongside code review and a real gateway with runtime guardrails.
+The static scans are a black-box probe of what a server advertises. **Classification there is heuristic: keyword and pattern matching over tool names and descriptions, not runtime behavior.** That means it can miss a server that hides its true behavior behind benign-looking text, and it will occasionally over- or under-classify a capability (tune those out with `--allowlist`). The `canary` probe does observe real behavior, but only of the read-only tools it is willing to call and only for what their output reveals; it does not exercise tools that require arguments it cannot safely synthesise. It cannot prove a server is safe; absence of findings is not proof of safety. Use it as one layer, alongside code review and a real gateway with runtime guardrails.
 
 MCP06-10 are the categories the OWASP standard itself frames as largely runtime properties, so ghostprobe deliberately covers only their statically-observable footprints and leaves the rest as documented gaps:
 
@@ -129,8 +137,8 @@ The OWASP MCP Top 10 is itself a young, beta-stage framework, so its categories 
 
 ## Roadmap
 
-- Live behavioral probing: call read-only tools with canary inputs and run the MCP03 output scanner on what they return. The output scanner ships now (`scan-output`); the safe live auto-calling is next.
 - The runtime halves of MCP06-10: OAuth-flow inspection (MCP06), active TLS/origin probing on HTTP/SSE transports (MCP07), and live resource/rate measurement (MCP10).
+- Canary probing over HTTP/SSE transports (it is stdio-only today) and planting a decoy secret to watch for active exfiltration, not just reflection.
 - A curated corpus of known-bad public servers as regression fixtures.
 
 ## License

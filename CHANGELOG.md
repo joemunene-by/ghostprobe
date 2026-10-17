@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.0 — canary live probe (behavioral, MCP03 + cross-tool capture)
+
+ghostprobe can now probe behavior, not just the advertised surface. The new
+`canary` command connects to a live stdio server, calls its read-only tools with
+a unique marker planted in their string inputs, and inspects what actually comes
+back.
+
+- Runs the MCP03 injection and hidden-character scan on real tool output, not
+  only on a saved file via `scan-output`.
+- Flags cross-tool capture (MCP04): if the marker planted in one tool's input
+  surfaces in another tool's output, the server is persisting or reflecting one
+  call into another, an exfiltration and injection surface a static scan cannot
+  observe.
+- Only calls tools that read. Anything classified as a send-to-external-medium
+  (`sink`) or code/shell (`exec`) is skipped, and a tool whose required argument
+  is not a string it can safely synthesise is skipped rather than guessed. What
+  was called and skipped is printed to stderr.
+- stdio transport only for now; HTTP/SSE canary probing is on the roadmap.
+
+10 new tests (78 total).
+
 ## v0.4.0 — MCP06-10 coverage (full OWASP MCP Top 10)
 
 ghostprobe now maps to all ten OWASP MCP categories. MCP06-10 are the ones the
