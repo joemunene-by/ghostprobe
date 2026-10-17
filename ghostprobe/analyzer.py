@@ -688,3 +688,53 @@ def _snippet(text: str, start: int, end: int, pad: int = 30) -> str:
     b = min(len(text), end + pad)
     s = text[a:b].replace("\n", " ").strip()
     return ("..." if a > 0 else "") + s + ("..." if b < len(text) else "")
+
+
+def analyze_canary(results: list[dict]) -> list[Finding]:
+    """Turn the outcome of a live canary probe into findings.
+
+    A canary probe actually calls the server's read-only tools with a unique
+    marker planted in their string inputs, then inspects what comes back. It
+    closes two gaps the static surface cannot see:
+
+    - MCP03 on real output: the returned text is scanned for the same injection
+      and hidden-character patterns as a tool description, but now on content
+      the tool genuinely produced, not just what it advertised.
+    - Cross-tool capture: if the marker planted in one tool's input surfaces in
+      another tool's output, the server is persisting or reflecting one call's
+      input into a different call, which is a data-capture / exfiltration surface
+      a black-box surface scan can never observe.
+
+    `results` is what the live layer collected: one dict per tool with keys
+    ``tool``, ``called`` (bool), ``canary`` (the marker planted, or None) and
+    ``output`` (the returned text).
+    """
+    findings: list[Finding] = []
+    planted = {r["canary"]: r["tool"] for r in results if r.get("called") and r.get("canary")}
+
+    for r in results:
+        if not r.get("called"):
+            continue
+        output = r.get("output") or ""
+        tool = r["tool"]
+        findings.extend(analyze_tool_output(tool, output))
+        for canary, source in planted.items():
+            if source == tool:
+                continue
+            if canary in output:
+                findings.append(Finding(
+                    owasp="MCP04", severity="high", tool=tool,
+                    title=f"Input to {source} surfaced in this tool's output",
+                    detail=(
+                        "A unique marker planted in the input to one tool came back "
+                        "in the output of a different tool. The server is persisting "
+                        "or reflecting one call's input into another call, so a tool "
+                        "that reads attacker-influenced content can seed what a later, "
+                        "more powerful tool returns. This cross-tool capture is a real "
+                        "exfiltration and injection surface that a static scan of the "
+                        "advertised tools cannot see."
+                    ),
+                    evidence=f"marker from {source} found in {tool} output",
+                ))
+    findings.sort(key=lambda f: (-f.rank, f.owasp))
+    return findings
