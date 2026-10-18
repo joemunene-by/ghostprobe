@@ -114,53 +114,65 @@ def _result_text(res) -> str:
     return "\n".join(parts)
 
 
+async def _canary_session(read, write, timeout: float) -> list[dict]:
+    """Drive one already-connected transport: open an MCP session over the given
+    read/write streams, list the tools, and call each read-only one with a
+    planted canary. Returns one dict per tool with keys ``tool``, ``called``,
+    ``reason``, ``canary`` and ``output``, ready for ``analyze_canary``. Shared
+    by every transport so the probing behaviour is identical over stdio and HTTP."""
+    from contextlib import AsyncExitStack
+
+    import anyio
+    from mcp import ClientSession
+
+    results: list[dict] = []
+    async with AsyncExitStack() as stack:
+        session = await stack.enter_async_context(ClientSession(read, write))
+        with anyio.fail_after(timeout):
+            await session.initialize()
+            listed = await session.list_tools()
+        for tool in (_normalize(t) for t in listed.tools):
+            name = tool.get("name") or "<tool>"
+            ok, reason = _safe_to_call(tool)
+            if not ok:
+                results.append({"tool": name, "called": False, "reason": reason, "canary": None, "output": ""})
+                continue
+            canary = make_canary()
+            built, why, planted = _build_args(tool, canary)
+            if built is None:
+                results.append({"tool": name, "called": False, "reason": why, "canary": None, "output": ""})
+                continue
+            try:
+                with anyio.fail_after(timeout):
+                    res = await session.call_tool(name, built)
+                results.append({
+                    "tool": name, "called": True, "reason": "",
+                    "canary": canary if planted else None, "output": _result_text(res),
+                })
+            except Exception as e:
+                results.append({
+                    "tool": name, "called": False,
+                    "reason": f"call failed: {type(e).__name__}", "canary": None, "output": "",
+                })
+    return results
+
+
 def probe_live_stdio(
     command: str, args: list[str], env: dict | None = None, timeout: float = 60.0
 ) -> list[dict]:
     """Connect to a stdio MCP server, then actively call its read-only tools with
-    a planted canary and collect what each returns. One dict per tool with keys
-    ``tool``, ``called``, ``reason``, ``canary`` and ``output``, ready for
-    ``analyze_canary``. Raises on connection failure, like fetch_tools_stdio."""
+    a planted canary and collect what each returns. Raises on connection failure,
+    like fetch_tools_stdio."""
     import asyncio
 
     async def _run() -> list[dict]:
         from contextlib import AsyncExitStack
 
-        import anyio
-        from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
-        results: list[dict] = []
         async with AsyncExitStack() as stack:
             params = StdioServerParameters(command=command, args=args, env=env)
             read, write = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            with anyio.fail_after(timeout):
-                await session.initialize()
-                listed = await session.list_tools()
-            for tool in (_normalize(t) for t in listed.tools):
-                name = tool.get("name") or "<tool>"
-                ok, reason = _safe_to_call(tool)
-                if not ok:
-                    results.append({"tool": name, "called": False, "reason": reason, "canary": None, "output": ""})
-                    continue
-                canary = make_canary()
-                built, why, planted = _build_args(tool, canary)
-                if built is None:
-                    results.append({"tool": name, "called": False, "reason": why, "canary": None, "output": ""})
-                    continue
-                try:
-                    with anyio.fail_after(timeout):
-                        res = await session.call_tool(name, built)
-                    results.append({
-                        "tool": name, "called": True, "reason": "",
-                        "canary": canary if planted else None, "output": _result_text(res),
-                    })
-                except Exception as e:
-                    results.append({
-                        "tool": name, "called": False,
-                        "reason": f"call failed: {type(e).__name__}", "canary": None, "output": "",
-                    })
-        return results
+            return await _canary_session(read, write, timeout)
 
     return asyncio.run(_run())
