@@ -3,6 +3,7 @@
   ghostprobe scan-file tools.json           analyse a saved tools/list dump
   ghostprobe stdio -- npx -y some-mcp        probe a live stdio MCP server
   ghostprobe canary -- npx -y some-mcp       call read-only tools, scan real output
+  ghostprobe canary-http https://host/mcp    same canary probe over HTTP/SSE
   ghostprobe ... --json                      machine-readable output
   ghostprobe ... --fail-on high              exit 1 if a finding >= severity
 """
@@ -61,6 +62,30 @@ def _finish(findings, target, ns) -> int:
         print(f"({suppressed} finding(s) suppressed by allowlist)", file=sys.stderr)
     _emit(findings, target, ns.as_json)
     return exit_code(findings, ns.fail_on)
+
+
+def _parse_headers(items: list[str] | None) -> dict[str, str]:
+    """Parse repeated --header "Name: value" strings into a dict."""
+    headers: dict[str, str] = {}
+    for item in items or []:
+        name, sep, value = item.partition(":")
+        if not sep:
+            raise ValueError(f"bad header '{item}', expected 'Name: value'")
+        headers[name.strip()] = value.strip()
+    return headers
+
+
+def _finish_canary(results, target, ns) -> int:
+    """Report what a canary probe called and skipped, then analyse and finish.
+    Shared by the stdio and HTTP canary commands so both behave identically."""
+    from .analyzer import analyze_canary
+
+    called = [r["tool"] for r in results if r["called"]]
+    skipped = [(r["tool"], r["reason"]) for r in results if not r["called"]]
+    print(f"ghostprobe: called {len(called)}, skipped {len(skipped)} of {len(results)} tools", file=sys.stderr)
+    for name, reason in skipped:
+        print(f"  skipped {name}: {reason}", file=sys.stderr)
+    return _finish(analyze_canary(results), target, ns)
 
 
 def _format_exc(e: BaseException) -> str:
@@ -123,6 +148,25 @@ def main(argv: list[str] | None = None) -> int:
     cn.add_argument("--timeout", type=float, default=60.0, help="seconds per MCP operation (default 60)")
     cn.add_argument("--debug", action="store_true", help="print the full traceback on failure")
     cn.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
+
+    ch = sub.add_parser(
+        "canary-http",
+        help="canary-probe a remote MCP server over HTTP/SSE (needs: pip install mcp)",
+    )
+    ch.add_argument("url", help="server URL, e.g. https://host/mcp")
+    ch.add_argument(
+        "--header", "-H", action="append", metavar="'Name: value'",
+        help="extra HTTP header (repeatable), e.g. -H 'Authorization: Bearer ...'",
+    )
+    ch.add_argument(
+        "--transport", choices=["auto", "http", "sse"], default="auto",
+        help="auto tries Streamable HTTP then SSE (default); force one with http or sse",
+    )
+    ch.add_argument("--json", action="store_true", dest="as_json")
+    ch.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"])
+    ch.add_argument("--timeout", type=float, default=60.0, help="seconds per MCP operation (default 60)")
+    ch.add_argument("--debug", action="store_true", help="print the full traceback on failure")
+    ch.add_argument("--allowlist", metavar="FILE", help="JSON list of finding ids to suppress")
 
     df = sub.add_parser("diff", help="diff two tools/list snapshots for rug pulls (MCP02)")
     df.add_argument("old", help="earlier tools/list JSON")
@@ -192,14 +236,34 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        called = [r["tool"] for r in results if r["called"]]
-        skipped = [(r["tool"], r["reason"]) for r in results if not r["called"]]
-        print(f"ghostprobe: called {len(called)}, skipped {len(skipped)} of {len(results)} tools", file=sys.stderr)
-        for name, reason in skipped:
-            print(f"  skipped {name}: {reason}", file=sys.stderr)
-        from .analyzer import analyze_canary
-        findings = analyze_canary(results)
-        return _finish(findings, target, ns)
+        return _finish_canary(results, target, ns)
+
+    if ns.cmd == "canary-http":
+        headers = _parse_headers(ns.header)
+        print(
+            f"ghostprobe: canary probe will CALL the read-only tools on '{ns.url}'. "
+            "Tools that send data out or run code are skipped.",
+            file=sys.stderr,
+        )
+        try:
+            from .client import probe_live_http
+            results = probe_live_http(ns.url, headers=headers, timeout=ns.timeout, transport=ns.transport)
+        except ImportError:
+            print("ghostprobe: live probing needs the MCP SDK. Run: pip install mcp", file=sys.stderr)
+            return 2
+        except BaseException as e:  # anyio/httpx failures are varied
+            if ns.debug:
+                import traceback
+                traceback.print_exc()
+            print(f"ghostprobe: could not probe server: {_format_exc(e)}", file=sys.stderr)
+            print(
+                "  hints: check the URL and that the server is reachable; a server that "
+                "speaks only SSE needs --transport sse (auto tries it second). Re-run "
+                "with --debug for the full traceback, or --timeout 120.",
+                file=sys.stderr,
+            )
+            return 2
+        return _finish_canary(results, ns.url, ns)
 
     if ns.cmd == "scan-output":
         try:

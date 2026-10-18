@@ -3,8 +3,17 @@ these cover the pure pieces: output analysis, cross-tool capture, and the
 read-only / argument-building logic that decides what gets called."""
 from __future__ import annotations
 
+import pytest
+
 from ghostprobe.analyzer import analyze_canary
-from ghostprobe.client import _build_args, _result_text, _safe_to_call, make_canary
+from ghostprobe.cli import _parse_headers
+from ghostprobe.client import (
+    _build_args,
+    _result_text,
+    _safe_to_call,
+    _transport_order,
+    make_canary,
+)
 
 
 def _called(tool, output, canary=None):
@@ -93,3 +102,28 @@ def test_result_text_flattens_dicts_and_objects():
 def test_make_canary_is_unique_and_marked():
     a, b = make_canary(), make_canary()
     assert a != b and a.startswith("GHOSTPROBE-CANARY-")
+
+
+# --- HTTP transport selection and header parsing --------------------------
+
+def test_transport_order_auto_prefers_http_then_sse():
+    assert _transport_order("auto") == ["http", "sse"]
+    assert _transport_order("http") == ["http"]
+    assert _transport_order("streamable") == ["http"]
+    assert _transport_order("sse") == ["sse"]
+
+
+def test_transport_order_rejects_unknown():
+    with pytest.raises(ValueError):
+        _transport_order("grpc")
+
+
+def test_parse_headers_splits_on_first_colon():
+    h = _parse_headers(["Authorization: Bearer a:b", "X-Env: prod "])
+    assert h == {"Authorization": "Bearer a:b", "X-Env": "prod"}
+    assert _parse_headers(None) == {}
+
+
+def test_parse_headers_rejects_missing_colon():
+    with pytest.raises(ValueError):
+        _parse_headers(["nocolon"])

@@ -176,3 +176,58 @@ def probe_live_stdio(
             return await _canary_session(read, write, timeout)
 
     return asyncio.run(_run())
+
+
+def _transport_order(transport: str) -> list[str]:
+    """Which HTTP transports to try, in order. 'auto' prefers the current
+    Streamable HTTP transport and falls back to the older SSE one."""
+    if transport in ("http", "streamable"):
+        return ["http"]
+    if transport == "sse":
+        return ["sse"]
+    if transport == "auto":
+        return ["http", "sse"]
+    raise ValueError(f"unknown transport '{transport}' (use auto, http, or sse)")
+
+
+def _probe_http_once(url: str, headers: dict | None, timeout: float, transport: str) -> list[dict]:
+    import asyncio
+
+    async def _run() -> list[dict]:
+        from contextlib import AsyncExitStack
+
+        async with AsyncExitStack() as stack:
+            if transport == "sse":
+                from mcp.client.sse import sse_client
+
+                read, write = await stack.enter_async_context(
+                    sse_client(url, headers=headers, timeout=timeout)
+                )
+            else:
+                from mcp.client.streamable_http import streamablehttp_client
+
+                read, write, _ = await stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers, timeout=timeout)
+                )
+            return await _canary_session(read, write, timeout)
+
+    return asyncio.run(_run())
+
+
+def probe_live_http(
+    url: str, headers: dict | None = None, timeout: float = 60.0, transport: str = "auto"
+) -> list[dict]:
+    """Canary-probe a remote MCP server over HTTP. Same behaviour as
+    ``probe_live_stdio``: it calls read-only tools with a planted canary and
+    returns one result dict per tool. ``transport`` is 'auto' (try Streamable
+    HTTP then SSE), 'http', or 'sse'. Raises the last connection error if every
+    transport in the chosen order fails."""
+    order = _transport_order(transport)
+    last: BaseException | None = None
+    for t in order:
+        try:
+            return _probe_http_once(url, headers, timeout, t)
+        except BaseException as e:  # try the next transport; re-raise if none work
+            last = e
+    assert last is not None
+    raise last
