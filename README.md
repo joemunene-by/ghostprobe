@@ -61,6 +61,13 @@ ghostprobe stdio -- npx -y @some/mcp-server
 ghostprobe canary -- npx -y @some/mcp-server
 ```
 
+For a remote server, `canary-http` runs the same probe over HTTP. It tries the Streamable HTTP transport first and falls back to the older SSE one; force either with `--transport`, and pass auth or other headers with `-H`:
+
+```
+ghostprobe canary-http https://host/mcp
+ghostprobe canary-http https://host/sse --transport sse -H 'Authorization: Bearer <token>'
+```
+
 It only calls tools that read. Anything that sends data to an external medium or runs code is skipped (its risk is already covered by the static scan), and a tool needing a non-string required argument is skipped rather than called with a guessed value. On the real output it runs the MCP03 injection and hidden-character scan, and if the marker planted in one tool's input surfaces in another tool's output it flags that cross-tool capture (MCP04), something a surface scan cannot see. It prints what it called and skipped to stderr.
 
 The `tools.json` for `scan-file` can be a bare list, an MCP `tools/list` result (`{"tools": [...]}`), or a raw JSON-RPC envelope.
@@ -138,7 +145,7 @@ The OWASP MCP Top 10 is itself a young, beta-stage framework, so its categories 
 ## Roadmap
 
 - The runtime halves of MCP06-10: OAuth-flow inspection (MCP06), active TLS/origin probing on HTTP/SSE transports (MCP07), and live resource/rate measurement (MCP10).
-- Canary probing over HTTP/SSE transports (it is stdio-only today) and planting a decoy secret to watch for active exfiltration, not just reflection.
+- Planting a decoy secret during a canary probe to watch for active exfiltration, not just reflection.
 - A curated corpus of known-bad public servers as regression fixtures.
 
 ## License

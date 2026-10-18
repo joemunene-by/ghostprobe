@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.6.0 — canary over HTTP/SSE
+
+The canary behavioral probe is no longer stdio-only. A new `canary-http` command
+runs the identical probe against a remote MCP server over HTTP.
+
+- Tries the current Streamable HTTP transport first and falls back to the older
+  SSE transport; `--transport {auto,http,sse}` forces a choice.
+- `-H 'Name: value'` (repeatable) passes auth and other headers, so a server
+  behind a bearer token can be probed.
+- The session loop is shared with the stdio probe, so what gets called, what
+  gets skipped, and how output is analysed are identical across transports.
+
+4 new tests (82 total).
+
 ## v0.5.0 — canary live probe (behavioral, MCP03 + cross-tool capture)
 
 ghostprobe can now probe behavior, not just the advertised surface. The new
