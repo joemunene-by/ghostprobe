@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.1 — false-positive and robustness fixes
+## v0.6.1: false-positive and robustness fixes
 
 Two correctness fixes to the static analyzer and the tools-file loader.
 
