@@ -456,6 +456,12 @@ def detect_supply_chain(tool: dict) -> list[Finding]:
     low = name.lower().replace("_", "-")
     base = low.rsplit("-", 1)[-1] if "-" in low else low
     for ref in _OFFICIAL_REF_SERVERS:
+        # Short reference names ("git", "time", "fetch") are ordinary words whose
+        # one-edit neighbourhood is full of legitimate tool names ("get", "times",
+        # "fetch"), so fuzzy-matching them is almost all false positives. Only
+        # treat the distinctive 6+ char names as typosquat targets.
+        if len(ref) < 6:
+            continue
         for cand in {low, base}:
             if cand and cand != ref and _edit_distance_le(cand, ref, 2 if len(ref) > 6 else 1):
                 out.append(Finding(

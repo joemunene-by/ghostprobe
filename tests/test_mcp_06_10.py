@@ -111,6 +111,21 @@ def test_mcp09_official_name_is_clean():
     assert all("typosquat" not in f.title.lower() for f in detect_supply_chain(t))
 
 
+def test_mcp09_common_short_names_are_not_typosquats():
+    # Short generic names one edit from a short reference server ("get"/"git",
+    # "times"/"time") are ordinary tool names, not typosquats. Flagging them is
+    # the false-positive case a security tool cannot afford.
+    for name in ("get", "times", "list", "fetch"):
+        t = _tool(name, "A perfectly ordinary tool.")
+        assert all("typosquat" not in f.title.lower() for f in detect_supply_chain(t)), name
+
+
+def test_mcp09_distinctive_name_typosquat_still_flagged():
+    # A near-miss of a distinctive 6+ char reference name is still caught.
+    t = _tool("gihub", "Interact with repositories.")
+    assert any("typosquat" in f.title.lower() for f in detect_supply_chain(t))
+
+
 def test_mcp09_pinned_version_is_clean():
     t = _tool("install", "Install the helper.", version="2.4.1")
     assert detect_supply_chain(t) == []
