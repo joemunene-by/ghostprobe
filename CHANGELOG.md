@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.6.1 — false-positive and robustness fixes
+
+Two correctness fixes to the static analyzer and the tools-file loader.
+
+- Supply chain (MCP09): the typosquat check no longer fuzzy-matches the short,
+  generic reference names (`git`, `time`, `fetch`, `slack`). A one-edit neighbour
+  of a 3-4 character name is almost always an ordinary tool (`get`, `times`), so
+  those were false positives. The distinctive 6+ character names (`github`,
+  `filesystem`, `postgres`, ...) are still matched, so a real near-miss like
+  `gihub` is still caught.
+- `scan-file` and `diff`: a tools file that is a JSON list of non-object entries
+  now fails with a clean error and exit code 2 instead of an uncaught traceback.
+
+4 new tests (86 total).
+
 ## v0.6.0 — canary over HTTP/SSE
 
 The canary behavioral probe is no longer stdio-only. A new `canary-http` command
