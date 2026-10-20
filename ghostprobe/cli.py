@@ -30,6 +30,8 @@ def load_tools_file(path: str) -> list[dict]:
             data = data["result"].get("tools", [])
     if not isinstance(data, list):
         raise ValueError("could not find a list of tools in the file")
+    if not all(isinstance(t, dict) for t in data):
+        raise ValueError("tools list contains a non-object entry; expected MCP tool objects")
     return data
 
 

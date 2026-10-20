@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ghostprobe.cli import load_tools_file, main
 from ghostprobe.findings import Finding
 from ghostprobe.report import exit_code, render_json, render_text, summarize
@@ -77,4 +79,19 @@ def test_cli_scan_file_json_mode(capsys):
 def test_cli_missing_file_is_clean_error(capsys):
     rc = main(["scan-file", "/no/such/file.json"])
     assert rc == 2
+    assert "cannot read tools" in capsys.readouterr().err
+
+
+def test_load_tools_file_rejects_non_object_entries(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps([{"name": "ok", "description": "d"}, "junk", 3]))
+    with pytest.raises(ValueError):
+        load_tools_file(str(bad))
+
+
+def test_cli_scan_file_non_object_list_is_clean_error(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps([1, 2, 3]))
+    rc = main(["scan-file", str(bad)])
+    assert rc == 2  # clean error, not an uncaught AttributeError traceback
     assert "cannot read tools" in capsys.readouterr().err
