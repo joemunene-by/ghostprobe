@@ -18,10 +18,7 @@ import unicodedata
 
 from .findings import Finding
 
-# --------------------------------------------------------------------------
-# Tool poisoning: imperative instructions aimed at the *model*, hidden inside
-# text that a human skims as a harmless tool description.
-# --------------------------------------------------------------------------
+
 _INJECTION_PATTERNS: list[tuple[str, str, str]] = [
     (r"ignore\s+(all\s+|any\s+|the\s+)?(previous|prior|above)", "high", "instruction override"),
     (r"disregard\s+(all\s+|any\s+|the\s+)?(previous|prior|earlier|instructions)", "high", "instruction override"),
@@ -36,11 +33,7 @@ _INJECTION_PATTERNS: list[tuple[str, str, str]] = [
     (r"\b(important|attention|system|note)\s*:\s*\S", "low", "embedded directive"),
 ]
 
-# Capability classification. Verb-aware on purpose: the danger from "untrusted
-# content" is *ingesting* attacker-influenceable text (a read action), so a
-# noun alone is not enough. "send_email" is a sink, not an untrusted-input leg,
-# even though the word "email" appears in it. Getting this wrong turns the
-# lethal-trifecta check into a false-positive machine.
+
 _READ_VERBS = r"\b(read|reads|get|gets|list|lists|fetch|fetches|load|loads|open|opens|cat|search|searches|query|queries|browse|browses|scrape|scrapes|crawl|crawls|receive|receives|pull|pulls|view|views|dump|dumps|export|exports|download|downloads|retrieve|retrieves)\b"
 _SEND_VERBS = r"\b(send|sends|post|posts|put|puts|upload|uploads|push|pushes|publish|publishes|notify|notifies|forward|forwards|share|shares|tweet|tweets|deliver|delivers|transmit|transmits|emit|emits|email|emails|message|messages)\b"
 _EXTERNAL_MEDIUM = r"\b(http|https|url|urls|web|webhook|email|emails|mail|smtp|sms|slack|discord|telegram|api|remote|external|outbound|internet|network)\b"

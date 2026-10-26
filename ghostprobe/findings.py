@@ -5,10 +5,6 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-# OWASP MCP Top 10 (2026) categories ghostprobe maps its findings to. We cover
-# the subset a dynamic black-box probe can actually observe from the outside.
-# MCP06-10 are covered for their statically-observable signals only; the
-# runtime-only residue of each is documented in analyzer.py and the README.
 OWASP_MCP = {
     "MCP01": "Tool Poisoning",
     "MCP02": "Rug Pull / Tool Mutation",
